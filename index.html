@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>Kubernetes 集群面板</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <section id="login-screen" class="login-screen hidden">
+    <form id="login-form" class="login-card card">
+      <div class="brand-mark login-mark">K</div><div class="eyebrow">KUBERNETES DASHBOARD</div><h1>登录集群面板</h1>
+      <p>输入启动脚本生成的访问密码。</p>
+      <label for="password-input">访问密码</label><input id="password-input" type="password" autocomplete="current-password" required autofocus />
+      <button class="primary" type="submit">登录 <span>→</span></button><div id="login-error" class="notice error"></div>
+    </form>
+  </section>
+  <div id="app" class="app-shell hidden">
+    <aside class="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">K</span><span>Kubernetes 面板</span></a>
+      <div class="cluster-status"><i id="sidebar-dot"></i><div><strong id="sidebar-status">正在检查</strong><small id="sidebar-context">kubeconfig.yaml</small></div></div>
+      <div class="nav-caption">集群资源</div>
+      <nav class="main-nav" aria-label="集群资源导航">
+        <button class="nav-item active" data-view="overview"><span>◫</span>集群总览</button>
+        <button class="nav-item" data-view="pods"><span>◈</span>Pods <b id="nav-pod-count">—</b></button>
+        <button class="nav-item" data-view="nodes"><span>⌂</span>Nodes <b id="nav-node-count">—</b></button>
+        <button class="nav-item" data-view="namespaces"><span>▦</span>Namespaces <b id="nav-ns-count">—</b></button>
+      </nav>
+      <div class="nav-caption namespace-caption">NAMESPACE</div>
+      <div id="namespace-nav" class="namespace-nav"><div class="side-empty">连接后显示 Namespace</div></div>
+      <div class="sidebar-bottom"><div class="readonly-note"><span>◉</span><div><strong>只读模式</strong><small>不会更改集群资源</small></div></div><button id="logout-button" class="logout-button" type="button">退出登录</button></div>
+    </aside>
+    <main class="main-area">
+      <header class="main-header"><div><div class="eyebrow">CONTAINER ORCHESTRATION</div><h1 id="page-title">集群总览</h1><p id="page-subtitle">查看集群健康状态和资源数量。</p></div><div class="header-actions"><span id="last-updated" class="updated-label">等待数据</span><button id="refresh-button" class="refresh-button" type="button" title="刷新资源">⟳ 刷新</button></div></header>
+      <div id="connection-alert" class="connection-alert hidden"><span id="connection-error">未连接</span><button id="connect-button" class="primary small" type="button">连接 kubeconfig.yaml</button></div>
+      <section id="view-overview" class="view-panel">
+        <div class="stats-grid">
+          <article class="stat-card card"><span class="stat-icon blue">◈</span><div><span class="stat-label">Pod 总数</span><strong id="pod-total">—</strong><small id="pod-note">集群范围</small></div></article>
+          <article class="stat-card card"><span class="stat-icon violet">⌂</span><div><span class="stat-label">Node 总数</span><strong id="node-total">—</strong><small id="node-ready">Ready —</small></div></article>
+          <article class="stat-card card"><span class="stat-icon green">▦</span><div><span class="stat-label">Namespace 总数</span><strong id="namespace-total">—</strong><small>集群范围</small></div></article>
+        </div>
+        <section class="content-card card"><div class="section-heading"><div><h2>快速访问 Namespace</h2><p>选择 Namespace 后直接查看其中的 Pod。</p></div><button class="text-button" data-go="namespaces" type="button">全部 Namespace →</button></div><div id="namespace-shortcuts" class="namespace-shortcuts"><div class="empty-state">连接后显示 Namespace</div></div></section>
+        <section class="content-card card"><div class="section-heading"><div><h2>Node 状态</h2><p>集群节点 Ready 状态概览。</p></div><button class="text-button" data-go="nodes" type="button">查看 Nodes →</button></div><div id="node-overview" class="node-overview"><div class="empty-state">连接后加载 Node</div></div></section>
+      </section>
+      <section id="view-pods" class="view-panel hidden">
+        <section class="content-card card"><div class="section-heading pod-toolbar"><div><h2>Pod 列表</h2><p id="pod-caption">按 Namespace 浏览 Pod 运行状态。</p></div><label class="select-field">Namespace<select id="namespace-select"></select></label></div><div class="table-wrap"><table><thead><tr><th>Pod 名称</th><th>状态</th><th>就绪</th><th>所在 Node</th><th>重启次数</th><th>创建时间</th></tr></thead><tbody id="pod-rows"><tr><td colspan="6" class="empty-cell">选择 Namespace 加载 Pod</td></tr></tbody></table></div><div id="pod-footer" class="table-footer"></div></section>
+      </section>
+      <section id="view-nodes" class="view-panel hidden">
+        <section class="content-card card"><div class="section-heading"><div><h2>Node 列表</h2><p>集群节点状态、版本和内部 IP。</p></div></div><div class="table-wrap"><table><thead><tr><th>Node 名称</th><th>状态</th><th>角色</th><th>Kubernetes 版本</th><th>内部 IP</th></tr></thead><tbody id="node-rows"><tr><td colspan="5" class="empty-cell">连接后加载 Node</td></tr></tbody></table></div></section>
+      </section>
+      <section id="view-namespaces" class="view-panel hidden">
+        <section class="content-card card"><div class="section-heading"><div><h2>Namespace 列表</h2><p>查看各 Namespace 中的 Pod 数量。</p></div></div><div id="namespace-table" class="namespace-table"><div class="empty-state">连接后加载 Namespace</div></div></section>
+      </section>
+      <footer>只读集群浏览 · kubeconfig 自动读取项目目录 · 服务端口由启动脚本配置</footer>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
