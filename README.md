@@ -1,6 +1,6 @@
 # Kubernetes 集群浏览器
 
-轻量只读 Kubernetes Web 面板。页面左侧提供集群总览、Pods、Nodes、Namespaces 导航；从 Namespace 可直接筛选 Pods。依赖固定为兼容 Kubernetes 1.28 和 Python 3.6 的版本。
+Kubernetes Web 管理面板。支持集群总览、节点与 Namespace 浏览，以及常见工作负载和资源的 YAML 管理。依赖固定为兼容 Kubernetes 1.28 和 Python 3.6 的版本。
 
 ## Linux 部署
 
@@ -36,6 +36,9 @@ K8S_DASHBOARD_HOST=0.0.0.0 K8S_DASHBOARD_PORT=8080 ./k8s.sh start
 - Namespace Pod 数量和快捷入口。
 - Node 状态、角色、Kubernetes 版本和内部 IP。
 - 按 Namespace 查看 Pod 状态、容器就绪数、Node、重启次数和创建时间。
-- 只读，不会创建、修改或删除 Kubernetes 资源。
+- 节点、Namespace、Pod 与通用 Kubernetes 资源浏览。
+- 常见资源 YAML 查看、patch 与多文档 apply 异步任务。
+- 节点 cordon/uncordon、Pod eviction、日志与事件接口。
+- 管理操作使用当前 kubeconfig 身份的 Kubernetes RBAC 权限；建议仅在可信网络使用，并为服务账户配置最小权限。
 - 日志写入 `logs/k8s-dashboard.log` 和 `logs/launcher.log`，不记录访问密码或 kubeconfig 内容。
 - Pod 总数最多扫描 100,000 个；单个 Namespace 最多展示 3,000 个 Pod。

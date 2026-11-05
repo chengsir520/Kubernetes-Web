@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections import Counter
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
@@ -56,6 +57,51 @@ API_CLIENT = None
 CORE = None
 ACTIVE_CONTEXT = ""
 CONNECT_ERROR = ""
+TASKS = {}
+TASK_LOCK = threading.Lock()
+
+RESOURCE_MAP = {
+    "deployments": ("apps", "Deployment"), "statefulsets": ("apps", "StatefulSet"),
+    "daemonsets": ("apps", "DaemonSet"), "jobs": ("batch", "Job"), "cronjobs": ("batch", "CronJob"),
+    "configmaps": ("core", "ConfigMap"), "secrets": ("core", "Secret"),
+    "services": ("core", "Service"), "ingresses": ("networking", "Ingress"),
+    "pvcs": ("core", "PersistentVolumeClaim"), "pvs": ("core", "PersistentVolume"),
+    "storageclasses": ("storage", "StorageClass"), "resourcequotas": ("core", "ResourceQuota"),
+}
+
+def resource_api(core, key):
+    group, _kind = RESOURCE_MAP[key]
+    api_client = core.api_client
+    return {"apps": client.AppsV1Api, "batch": client.BatchV1Api, "core": client.CoreV1Api,
+            "networking": client.NetworkingV1Api, "storage": client.StorageV1Api}[group](api_client=api_client)
+
+def call_resource(api, key, verb, namespace=None, name=None, body=None):
+    methods = {
+      "deployments": ("list_namespaced_deployment", "read_namespaced_deployment", "patch_namespaced_deployment", "delete_namespaced_deployment"),
+      "statefulsets": ("list_namespaced_stateful_set", "read_namespaced_stateful_set", "patch_namespaced_stateful_set", "delete_namespaced_stateful_set"),
+      "daemonsets": ("list_namespaced_daemon_set", "read_namespaced_daemon_set", "patch_namespaced_daemon_set", "delete_namespaced_daemon_set"),
+      "jobs": ("list_namespaced_job", "read_namespaced_job", "patch_namespaced_job", "delete_namespaced_job"),
+      "cronjobs": ("list_namespaced_cron_job", "read_namespaced_cron_job", "patch_namespaced_cron_job", "delete_namespaced_cron_job"),
+      "configmaps": ("list_namespaced_config_map", "read_namespaced_config_map", "patch_namespaced_config_map", "delete_namespaced_config_map"),
+      "secrets": ("list_namespaced_secret", "read_namespaced_secret", "patch_namespaced_secret", "delete_namespaced_secret"),
+      "services": ("list_namespaced_service", "read_namespaced_service", "patch_namespaced_service", "delete_namespaced_service"),
+      "ingresses": ("list_namespaced_ingress", "read_namespaced_ingress", "patch_namespaced_ingress", "delete_namespaced_ingress"),
+      "pvcs": ("list_namespaced_persistent_volume_claim", "read_namespaced_persistent_volume_claim", "patch_namespaced_persistent_volume_claim", "delete_namespaced_persistent_volume_claim"),
+      "pvs": ("list_persistent_volume", "read_persistent_volume", "patch_persistent_volume", "delete_persistent_volume"),
+      "storageclasses": ("list_storage_class", "read_storage_class", "patch_storage_class", "delete_storage_class"),
+      "resourcequotas": ("list_namespaced_resource_quota", "read_namespaced_resource_quota", "patch_namespaced_resource_quota", "delete_namespaced_resource_quota")}
+    method_name = methods[key][verb]
+    if verb == 0 and not namespace and "namespaced" in method_name:
+        all_namespaces = {"deployments":"list_deployment_for_all_namespaces", "statefulsets":"list_stateful_set_for_all_namespaces", "daemonsets":"list_daemon_set_for_all_namespaces", "jobs":"list_job_for_all_namespaces", "cronjobs":"list_cron_job_for_all_namespaces", "configmaps":"list_config_map_for_all_namespaces", "secrets":"list_secret_for_all_namespaces", "services":"list_service_for_all_namespaces", "ingresses":"list_ingress_for_all_namespaces", "pvcs":"list_persistent_volume_claim_for_all_namespaces", "resourcequotas":"list_resource_quota_for_all_namespaces"}
+        method_name = all_namespaces.get(key, method_name)
+    method = getattr(api, method_name)
+    if verb == 0:
+        return method(namespace, _request_timeout=25) if namespace and "namespaced" in method_name else method(_request_timeout=25)
+    if namespace and "namespaced" in methods[key][verb]: return method(name, namespace, body=body, _request_timeout=25) if verb >= 2 else method(name, namespace, _request_timeout=25)
+    return method(name, body=body, _request_timeout=25) if verb >= 2 else method(name, _request_timeout=25)
+
+def plain(obj):
+    return client.ApiClient().sanitize_for_serialization(obj)
 
 
 def load_password():
@@ -207,6 +253,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(path)
         if not self.guard(): return
         query = parse_qs(urlparse(self.path).query)
+        if path == "/api/task":
+            if not self.guard(): return
+            with TASK_LOCK: task = TASKS.get(query.get("id", [""])[0])
+            if not task: return self.send_json(404, {"error": "任务不存在"})
+            return self.send_json(200, task)
         try:
             with LOCK:
                 core = current_core()
@@ -246,12 +297,56 @@ class Handler(BaseHTTPRequestHandler):
                         if not continuation: break
                         if len(result) >= 3000: break
                     return self.send_json(200, {"pods": result[:3000], "truncated": bool(continuation), "limit": 3000})
+                if path == "/api/nodes":
+                    nodes = core.list_node(_request_timeout=25).items
+                    data = nodes_payload(nodes)
+                    for item, node in zip(data, nodes):
+                        item.update({"conditions": plain(node.status.conditions or []), "capacity": plain(node.status.capacity or {}), "allocatable": plain(node.status.allocatable or {}), "info": plain(node.status.node_info) if node.status.node_info else {}, "labels": node.metadata.labels or {}, "taints": plain(node.spec.taints or []), "pods": [plain(p) for p in core.list_pod_for_all_namespaces(field_selector="spec.nodeName=" + node.metadata.name, _request_timeout=20).items]})
+                    return self.send_json(200, {"nodes": data})
+                if path == "/api/metrics":
+                    custom = client.CustomObjectsApi(api_client=API_CLIENT)
+                    kind = query.get("kind", ["nodes"])[0]
+                    if kind not in ("nodes", "pods"):
+                        LOGGER.warning("metrics_request_invalid kind=%s", kind)
+                        return self.send_json(400, {"error": "kind 仅支持 nodes 或 pods"})
+                    resource = "nodes" if kind == "nodes" else "pods"
+                    LOGGER.info("metrics_request_start api=metrics.k8s.io/v1beta1 resource=%s", resource)
+                    value = custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", resource, _request_timeout=15)
+                    LOGGER.info("metrics_request_success api=metrics.k8s.io/v1beta1 resource=%s count=%s", resource, len(value.get("items", [])))
+                    return self.send_json(200, {"items": value.get("items", [])})
+                if path == "/api/namespaces":
+                    result = []
+                    for ns in core.list_namespace(_request_timeout=25).items:
+                        quotas = core.list_namespaced_resource_quota(ns.metadata.name, _request_timeout=15).items
+                        result.append({"name": ns.metadata.name, "status": ns.status.phase, "labels": ns.metadata.labels or {}, "quotas": [plain(q) for q in quotas]})
+                    return self.send_json(200, {"namespaces": result})
+                if path == "/api/resource":
+                    key = query.get("type", [""])[0]; namespace = query.get("namespace", [""])[0]; name = query.get("name", [""])[0]
+                    if key not in RESOURCE_MAP: return self.send_json(400, {"error": "不支持的资源类型"})
+                    api = resource_api(core, key)
+                    obj = call_resource(api, key, 1 if name else 0, namespace or None, name or None)
+                    if name:
+                        doc = plain(obj)
+                        return self.send_json(200, {"resource": doc, "yaml": __import__('yaml').safe_dump(doc, allow_unicode=True, sort_keys=False)})
+                    return self.send_json(200, {"items": plain(obj.items)})
+                if path == "/api/pod":
+                    namespace = query.get("namespace", [""])[0]; name = query.get("name", [""])[0]
+                    if not namespace or not name: return self.send_json(400, {"error": "缺少 Pod 参数"})
+                    pod = core.read_namespaced_pod(name, namespace, _request_timeout=20)
+                    events = core.list_namespaced_event(namespace, field_selector="involvedObject.name=" + name, _request_timeout=20).items
+                    return self.send_json(200, {"pod": plain(pod), "events": plain(events), "describe": "\n".join(["Name: " + name, "Namespace: " + namespace, "Phase: " + str(pod.status.phase), "Node: " + str(pod.spec.node_name or ""), "IP: " + str(pod.status.pod_ip or ""), "Conditions: " + json.dumps(plain(pod.status.conditions or []), ensure_ascii=False)])})
+                if path == "/api/logs":
+                    namespace = query.get("namespace", [""])[0]; name = query.get("name", [""])[0]; container = query.get("container", [""])[0]
+                    logs = core.read_namespaced_pod_log(name, namespace, container=container or None, tail_lines=500, timestamps=True, _request_timeout=25)
+                    return self.send_json(200, {"logs": logs})
             return self.send_json(404, {"error": "接口未找到"})
         except ApiException as exc:
             LOGGER.warning("kubernetes_api_error status=%s reason=%s", exc.status, exc.reason)
+            if path == "/api/metrics": LOGGER.error("metrics_request_failed status=%s reason=%s body=%s", exc.status, exc.reason, (exc.body or "")[:1000])
             return self.send_json(502, {"error": f"Kubernetes API 错误 {exc.status}: {exc.reason or '请求失败'}"})
         except Exception as exc:
             LOGGER.exception("get_failed route=%s", path)
+            if path == "/api/metrics": LOGGER.exception("metrics_request_failed route=%s", path)
             return self.send_json(502, {"error": f"读取集群数据失败：{exc}"})
 
     def serve_static(self, path: str) -> None:
@@ -266,6 +361,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 
@@ -293,6 +390,71 @@ class Handler(BaseHTTPRequestHandler):
                 connect_local_kubeconfig()
                 if CORE is None: return self.send_json(502, {"error": CONNECT_ERROR or "连接失败"})
                 return self.send_json(200, {"connected": True, "context": ACTIVE_CONTEXT})
+            if path == "/api/resource/apply" or path == "/api/resource/patch" or path == "/api/resource/delete":
+                import yaml
+                docs = list(yaml.safe_load_all(payload.get("yaml", ""))) if path.endswith("apply") else ([yaml.safe_load(payload.get("yaml", ""))] if payload.get("yaml") else [payload.get("body", {})])
+                def task_runner(task_id):
+                    state = {"id": task_id, "status": "running", "steps": [], "error": ""}
+                    with TASK_LOCK: TASKS[task_id] = state
+                    try:
+                        for doc in docs:
+                            if not isinstance(doc, dict) or not doc.get("kind"): continue
+                            meta = doc.get("metadata") or {}; name = meta.get("name"); ns = meta.get("namespace", "default")
+                            kind = doc["kind"].lower()
+                            key = {v[1].lower(): k for k, v in RESOURCE_MAP.items()}.get(kind)
+                            if path.endswith("apply"):
+                                if not key: raise ValueError("暂不支持该资源类型：" + doc["kind"])
+                                api = resource_api(current_core(), key)
+                                try: call_resource(api, key, 1, ns, name)
+                                except ApiException as exc:
+                                    if exc.status != 404: raise
+                                    call_resource(api, key, 0, ns)
+                                    fn = getattr(api, {"deployments":"create_namespaced_deployment", "statefulsets":"create_namespaced_stateful_set", "daemonsets":"create_namespaced_daemon_set", "jobs":"create_namespaced_job", "cronjobs":"create_namespaced_cron_job", "configmaps":"create_namespaced_config_map", "secrets":"create_namespaced_secret", "services":"create_namespaced_service", "ingresses":"create_namespaced_ingress", "pvcs":"create_namespaced_persistent_volume_claim"}.get(key, ""), None)
+                                    if fn is None: raise ValueError("此资源暂不支持创建")
+                                    fn(ns, doc, _request_timeout=25)
+                                else: call_resource(api, key, 2, ns, name, doc)
+                            elif path.endswith("patch"):
+                                if key not in RESOURCE_MAP: raise ValueError("不支持的资源类型")
+                                patch_doc = dict(doc)
+                                meta_patch = dict(patch_doc.get("metadata") or {})
+                                for field in ("creationTimestamp", "deletionTimestamp", "deletionGracePeriodSeconds", "managedFields", "resourceVersion", "selfLink", "uid", "generation"):
+                                    meta_patch.pop(field, None)
+                                patch_doc["metadata"] = meta_patch
+                                patch_doc.pop("status", None)
+                                call_resource(resource_api(current_core(), key), key, 2, ns, name, patch_doc)
+                            else:
+                                if key not in RESOURCE_MAP: raise ValueError("不支持的资源类型")
+                                call_resource(resource_api(current_core(), key), key, 3, ns, name)
+                            state["steps"].append({"resource": doc["kind"] + "/" + str(name), "status": "complete"})
+                            LOGGER.info("resource_task_step_complete task_id=%s action=%s kind=%s namespace=%s name=%s", task_id, path.rsplit("/", 1)[-1], doc["kind"], ns, name)
+                        state["status"] = "complete"
+                        LOGGER.info("resource_task_complete task_id=%s steps=%s", task_id, len(state["steps"]))
+                    except Exception as exc:
+                        state["status"] = "failed"; state["error"] = str(exc)[:500]
+                        LOGGER.exception("resource_task_failed task_id=%s", task_id)
+                task_id = uuid.uuid4().hex
+                threading.Thread(target=task_runner, args=(task_id,), daemon=True).start()
+                return self.send_json(202, {"task_id": task_id})
+            if path == "/api/namespace":
+                name = str(payload.get("name", ""))
+                if not name: return self.send_json(400, {"error": "请输入 Namespace 名称"})
+                current_core().create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=name)), _request_timeout=20)
+                return self.send_json(201, {"ok": True})
+            if path == "/api/node/schedule":
+                name = payload.get("name"); cordon = bool(payload.get("cordon"))
+                current_core().patch_node(name, {"spec": {"unschedulable": cordon}}, _request_timeout=20)
+                return self.send_json(200, {"ok": True})
+            if path == "/api/task":
+                with TASK_LOCK: task = TASKS.get(payload.get("task_id"))
+                if not task: return self.send_json(404, {"error": "任务不存在"})
+                return self.send_json(200, task)
+            if path == "/api/pod/evict":
+                namespace, name = payload.get("namespace"), payload.get("name")
+                eviction = {"apiVersion":"policy/v1", "kind":"Eviction", "metadata":{"name":name,"namespace":namespace}}
+                client.PolicyV1Api(api_client=API_CLIENT).create_namespaced_pod_eviction(name, namespace, eviction, _request_timeout=25)
+                return self.send_json(202, {"ok": True})
+            if path == "/api/pod/exec":
+                return self.send_json(501, {"error": "WebSocket exec 需部署终端代理；当前服务不开放原始命令通道"})
             return self.send_json(404, {"error": "接口未找到"})
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})

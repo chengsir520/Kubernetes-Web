@@ -26,10 +26,13 @@
         <button class="nav-item" data-view="pods"><span>◈</span>Pods <b id="nav-pod-count">—</b></button>
         <button class="nav-item" data-view="nodes"><span>⌂</span>Nodes <b id="nav-node-count">—</b></button>
         <button class="nav-item" data-view="namespaces"><span>▦</span>Namespaces <b id="nav-ns-count">—</b></button>
+        <button class="nav-item" data-view="resources"><span>▤</span>资源管理</button>
+        <button class="nav-item" data-view="publish"><span>⇧</span>资源发布</button>
+        <button class="nav-item" data-view="metrics"><span>⌁</span>监控指标</button>
       </nav>
       <div class="nav-caption namespace-caption">NAMESPACE</div>
       <div id="namespace-nav" class="namespace-nav"><div class="side-empty">连接后显示 Namespace</div></div>
-      <div class="sidebar-bottom"><div class="readonly-note"><span>◉</span><div><strong>只读模式</strong><small>不会更改集群资源</small></div></div><button id="logout-button" class="logout-button" type="button">退出登录</button></div>
+      <div class="sidebar-bottom"><div class="readonly-note"><span>◉</span><div><strong>管理模式</strong><small>操作受 kubeconfig RBAC 权限控制</small></div></div><button id="logout-button" class="logout-button" type="button">退出登录</button></div>
     </aside>
     <main class="main-area">
       <header class="main-header"><div><div class="eyebrow">CONTAINER ORCHESTRATION</div><h1 id="page-title">集群总览</h1><p id="page-subtitle">查看集群健康状态和资源数量。</p></div><div class="header-actions"><span id="last-updated" class="updated-label">等待数据</span><button id="refresh-button" class="refresh-button" type="button" title="刷新资源">⟳ 刷新</button></div></header>
@@ -47,11 +50,17 @@
         <section class="content-card card"><div class="section-heading pod-toolbar"><div><h2>Pod 列表</h2><p id="pod-caption">按 Namespace 浏览 Pod 运行状态。</p></div><label class="select-field">Namespace<select id="namespace-select"></select></label></div><div class="table-wrap"><table><thead><tr><th>Pod 名称</th><th>状态</th><th>就绪</th><th>所在 Node</th><th>重启次数</th><th>创建时间</th></tr></thead><tbody id="pod-rows"><tr><td colspan="6" class="empty-cell">选择 Namespace 加载 Pod</td></tr></tbody></table></div><div id="pod-footer" class="table-footer"></div></section>
       </section>
       <section id="view-nodes" class="view-panel hidden">
-        <section class="content-card card"><div class="section-heading"><div><h2>Node 列表</h2><p>集群节点状态、版本和内部 IP。</p></div></div><div class="table-wrap"><table><thead><tr><th>Node 名称</th><th>状态</th><th>角色</th><th>Kubernetes 版本</th><th>内部 IP</th></tr></thead><tbody id="node-rows"><tr><td colspan="5" class="empty-cell">连接后加载 Node</td></tr></tbody></table></div></section>
+        <section class="content-card card"><div class="section-heading"><div><h2>Node 列表</h2><p>集群节点状态、版本和内部 IP。</p></div></div><div class="table-wrap"><table><thead><tr><th>Node 名称</th><th>状态</th><th>角色</th><th>Kubernetes 版本</th><th>内部 IP</th></tr></thead><tbody id="node-rows"><tr><td colspan="5" class="empty-cell">连接后加载 Node</td></tr></tbody></table></div><pre id="node-detail" class="detail-output">节点详情将在此显示</pre></section>
       </section>
       <section id="view-namespaces" class="view-panel hidden">
-        <section class="content-card card"><div class="section-heading"><div><h2>Namespace 列表</h2><p>查看各 Namespace 中的 Pod 数量。</p></div></div><div id="namespace-table" class="namespace-table"><div class="empty-state">连接后加载 Namespace</div></div></section>
+        <section class="content-card card"><div class="section-heading"><div><h2>Namespace 列表</h2><p>查看 Namespace 状态和配额。</p></div><div class="resource-tools"><input id="namespace-search" placeholder="搜索 Namespace"><input id="namespace-create-name" placeholder="新 Namespace 名称"><button id="namespace-create" class="refresh-button">创建</button></div></div><div id="namespace-table" class="namespace-table"><div class="empty-state">连接后加载 Namespace</div></div></section>
       </section>
+      <section id="view-resources" class="view-panel hidden">
+        <section class="content-card card"><div class="section-heading"><div><h2>资源浏览与编辑</h2><p>按类型和 Namespace 查看 Kubernetes 资源；修改会以异步任务执行。</p></div><div class="resource-tools"><select id="resource-type"><option value="deployments">Deployment</option><option value="statefulsets">StatefulSet</option><option value="daemonsets">DaemonSet</option><option value="jobs">Job</option><option value="cronjobs">CronJob</option><option value="configmaps">ConfigMap</option><option value="secrets">Secret</option><option value="services">Service</option><option value="ingresses">Ingress</option><option value="pvcs">PVC</option><option value="pvs">PV</option><option value="storageclasses">StorageClass</option><option value="resourcequotas">ResourceQuota</option></select><input id="resource-namespace" placeholder="Namespace（集群资源留空）"><button id="resource-load" class="refresh-button">浏览</button></div></div><div class="table-wrap"><table><thead><tr><th>名称</th><th>Namespace</th><th>状态 / 摘要</th><th>操作</th></tr></thead><tbody id="resource-rows"><tr><td colspan="4" class="empty-cell">选择资源类型并浏览</td></tr></tbody></table></div></section>
+        <section class="content-card card"><div class="section-heading"><div><h2>YAML 编辑器</h2><p>编辑选中资源并提交 patch 任务。</p></div><button id="resource-patch" class="primary small">提交修改</button></div><textarea id="resource-yaml" class="yaml-editor" spellcheck="false" placeholder="选择一个资源后显示 YAML"></textarea></section>
+      </section>
+      <section id="view-publish" class="view-panel hidden"><section class="content-card card"><div class="section-heading"><div><h2>YAML 多文档发布</h2><p>支持常见 namespaced 与集群级资源，任务异步执行。</p></div><button id="apply-yaml" class="primary small">Apply</button></div><textarea id="publish-yaml" class="yaml-editor" spellcheck="false" placeholder="粘贴 Kubernetes YAML 文档，可使用 --- 分隔"></textarea><div id="task-status" class="table-footer"></div></section></section>
+      <section id="view-metrics" class="view-panel hidden"><section class="content-card card"><div class="section-heading"><div><h2>资源监控</h2><p>metrics-server 提供节点与 Pod 的即时 CPU/内存用量。</p></div><div class="resource-tools"><select id="metrics-kind"><option value="nodes">节点</option><option value="pods">Pod</option></select><button id="metrics-load" class="refresh-button">刷新</button></div></div><div id="metrics-output" class="table-wrap"><div class="empty-state">点击刷新读取 Metrics API</div></div></section></section>
       <footer>只读集群浏览 · kubeconfig 自动读取项目目录 · 服务端口由启动脚本配置</footer>
     </main>
   </div>

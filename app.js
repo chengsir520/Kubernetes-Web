@@ -7,6 +7,8 @@ const titles = {
   pods: ['Pods', '按 Namespace 浏览 Pod 运行状态。'],
   nodes: ['Nodes', '查看集群节点状态、版本和内部 IP。'],
   namespaces: ['Namespaces', '查看各 Namespace 中的 Pod 数量。'],
+  resources: ['资源管理', '浏览、查看与编辑集群资源。'], publish: ['资源发布', '提交 YAML 多文档资源发布任务。'],
+  metrics: ['监控指标', '查看集群 CPU 与内存使用量。'],
 };
 
 async function api(url, options = {}) {
@@ -71,7 +73,7 @@ function renderNamespaceTable(items) {
   if (!items.length) { box.textContent = '没有 Namespace'; return; }
   const table = document.createElement('table'); table.innerHTML = '<thead><tr><th>Namespace</th><th>Pod 数量</th><th>操作</th></tr></thead>';
   const body = document.createElement('tbody');
-  items.forEach((item) => { const row = document.createElement('tr'); const name = document.createElement('td'); name.className = 'pod-name'; name.textContent = item.name; const count = document.createElement('td'); count.textContent = item.pod_count; const action = document.createElement('td'); const button = document.createElement('button'); button.className = 'text-button'; button.type = 'button'; button.textContent = '查看 Pod →'; button.addEventListener('click', () => { selectView('pods'); $('#namespace-select').value = item.name; loadPods(item.name); }); action.append(button); row.append(name, count, action); body.append(row); });
+  items.filter(i => !$('#namespace-search')?.value || i.name.includes($('#namespace-search').value)).forEach((item) => { const row = document.createElement('tr'); const name = document.createElement('td'); name.className = 'pod-name'; name.textContent = item.name; const count = document.createElement('td'); count.textContent = item.pod_count; const action = document.createElement('td'); const button = document.createElement('button'); button.className = 'text-button'; button.type = 'button'; button.textContent = '查看 Pod →'; button.addEventListener('click', () => { selectView('pods'); $('#namespace-select').value = item.name; loadPods(item.name); }); action.append(button); row.append(name, count, action); body.append(row); });
   table.append(body); box.append(table);
 }
 function renderShortcuts(items) {
@@ -121,6 +123,33 @@ $$('.nav-item').forEach((button) => button.addEventListener('click', () => selec
 $$('[data-go]').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.go)));
 $('#namespace-select').addEventListener('change', (event) => loadPods(event.target.value));
 $('#refresh-button').addEventListener('click', loadSummary);
+$('#resource-load').addEventListener('click', async () => {
+  const type = $('#resource-type').value, ns = $('#resource-namespace').value.trim();
+  const body = $('#resource-rows'); body.innerHTML = '<tr><td colspan="4" class="empty-cell">正在读取…</td></tr>';
+  try { const data = await api(`/api/resource?type=${encodeURIComponent(type)}&namespace=${encodeURIComponent(ns)}`); body.replaceChildren();
+    for (const item of data.items || []) { const meta=item.metadata||{}, row=document.createElement('tr');
+      const cells=[meta.name||'—',meta.namespace||'集群级',item.status?.readyReplicas !== undefined ? `${item.status.readyReplicas}/${item.spec?.replicas||0} Ready` : (item.status?.phase||item.spec?.type||item.kind||'')];
+      cells.forEach(v=>{const td=document.createElement('td');td.textContent=v;row.append(td)});
+      const action=document.createElement('td'), btn=document.createElement('button');btn.className='text-button';btn.textContent='查看 YAML';btn.onclick=async()=>{const d=await api(`/api/resource?type=${type}&namespace=${encodeURIComponent(meta.namespace||ns)}&name=${encodeURIComponent(meta.name)}`);$('#resource-yaml').value=d.yaml;$('#resource-yaml').dataset.name=meta.name;$('#resource-yaml').dataset.ns=meta.namespace||ns;$('#resource-yaml').dataset.type=type};action.append(btn);row.append(action);body.append(row);
+    } if (!body.children.length) body.innerHTML='<tr><td colspan="4" class="empty-cell">没有资源</td></tr>';
+  } catch(e) {body.innerHTML='';emptyRow(body,4,e.message)}
+});
+async function submitTask(url, payload) { const result=await api(url,{method:'POST',body:JSON.stringify(payload)}); const out=$('#task-status');out.textContent=`任务 ${result.task_id} 已提交`;
+  const poll=async()=>{try{const state=await api(`/api/task?id=${encodeURIComponent(result.task_id)}`);out.textContent=`任务 ${state.id}: ${state.status}${state.error?` — ${state.error}`:''}`;if(state.status==='running')setTimeout(poll,1200)}catch(e){out.textContent=e.message}};setTimeout(poll,500);
+}
+$('#resource-patch').addEventListener('click',async()=>{try{const y=$('#resource-yaml'), obj=JSON.parse('{}'); await submitTask('/api/resource/patch',{type:y.dataset.type,name:y.dataset.name,namespace:y.dataset.ns,yaml:y.value})}catch(e){$('#task-status').textContent=e.message}});
+$('#apply-yaml').addEventListener('click',async()=>{try{await submitTask('/api/resource/apply',{yaml:$('#publish-yaml').value})}catch(e){ $('#task-status').textContent=e.message }});
+$('#metrics-load').addEventListener('click',async()=>{
+  const box=$('#metrics-output');box.textContent='正在读取 metrics.k8s.io…';
+  try { const kind=$('#metrics-kind').value, result=await api(`/api/metrics?kind=${kind}`); const table=document.createElement('table');
+    table.innerHTML=kind==='nodes'?'<thead><tr><th>节点</th><th>CPU</th><th>内存</th><th>采样时间</th></tr></thead>':'<thead><tr><th>Namespace</th><th>Pod</th><th>容器 CPU</th><th>容器内存</th></tr></thead>';
+    const body=document.createElement('tbody');
+    for(const item of result.items||[]){const row=document.createElement('tr');const cells=kind==='nodes'?[item.metadata?.name,item.usage?.cpu,item.usage?.memory,item.timestamp]:[item.metadata?.namespace,item.metadata?.name,(item.containers||[]).map(c=>`${c.name}: ${c.usage?.cpu}`).join(' · '),(item.containers||[]).map(c=>`${c.name}: ${c.usage?.memory}`).join(' · ')];
+      for(const value of cells){const cell=document.createElement('td');cell.textContent=value||'—';row.append(cell)}body.append(row)}
+    if(!body.children.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.className='empty-cell';cell.textContent='Metrics API 暂无数据';row.append(cell);body.append(row)}
+    table.append(body);box.replaceChildren(table);
+  } catch(e){box.textContent=`读取 Metrics API 失败：${e.message}`}
+});
 $('#connect-button').addEventListener('click', async (event) => {
   event.currentTarget.disabled = true; $('#connection-error').textContent = '正在读取 kubeconfig.yaml 并连接…';
   try { const state = await api('/api/connect', { method: 'POST', body: '{}' }); setConnection(true, state.context); await loadSummary(); }

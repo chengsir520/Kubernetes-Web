@@ -1,4 +1,5 @@
 kubeconfig.yaml
+remote-server.conf
 logs/
 .venv/
 .venv.*/
