@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b1220" />
-  <title>Kubernetes 集群面板</title>
+  <title>Kubernetes 集群管理面板</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -18,7 +18,7 @@
   </section>
   <div id="app" class="app-shell hidden">
     <aside class="sidebar">
-      <a class="brand" href="#"><span class="brand-mark">K</span><span>Kubernetes 面板</span></a>
+      <a class="brand" href="#"><span class="brand-mark">K</span><span>Kubernetes 集群管理面板</span></a>
       <div class="cluster-status"><i id="sidebar-dot"></i><div><strong id="sidebar-status">正在检查</strong><small id="sidebar-context">kubeconfig.yaml</small></div></div>
       <div class="nav-caption">集群资源</div>
       <nav class="main-nav" aria-label="集群资源导航">
@@ -61,7 +61,7 @@
       </section>
       <section id="view-publish" class="view-panel hidden"><section class="content-card card"><div class="section-heading"><div><h2>YAML 多文档发布</h2><p>支持常见 namespaced 与集群级资源，任务异步执行。</p></div><button id="apply-yaml" class="primary small">Apply</button></div><textarea id="publish-yaml" class="yaml-editor" spellcheck="false" placeholder="粘贴 Kubernetes YAML 文档，可使用 --- 分隔"></textarea><div id="task-status" class="table-footer"></div></section></section>
       <section id="view-metrics" class="view-panel hidden"><section class="content-card card"><div class="section-heading"><div><h2>资源监控</h2><p>metrics-server 提供节点与 Pod 的即时 CPU/内存用量。</p></div><div class="resource-tools"><select id="metrics-kind"><option value="nodes">节点</option><option value="pods">Pod</option></select><button id="metrics-load" class="refresh-button">刷新</button></div></div><div id="metrics-output" class="table-wrap"><div class="empty-state">点击刷新读取 Metrics API</div></div></section></section>
-      <footer>只读集群浏览 · kubeconfig 自动读取项目目录 · 服务端口由启动脚本配置</footer>
+      <footer>kubeconfig 自动读取项目目录 · 服务端口由启动脚本配置</footer>
     </main>
   </div>
   <script src="app.js"></script>

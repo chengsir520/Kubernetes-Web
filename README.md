@@ -1,4 +1,4 @@
-# Kubernetes 集群浏览器
+# Kubernetes 集群管理面板
 
 Kubernetes Web 管理面板。支持集群总览、节点与 Namespace 浏览，以及常见工作负载和资源的 YAML 管理。依赖固定为兼容 Kubernetes 1.28 和 Python 3.6 的版本。
 
